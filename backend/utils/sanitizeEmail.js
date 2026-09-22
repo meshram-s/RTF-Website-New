@@ -37,4 +37,6 @@ function sanitizeEmail(email) {
     .replace(/\]/g, '_rb_');   // forbidden
 }
 
-module.exports = { sanitizeEmail };
+// module.exports = { sanitizeEmail };
+// With this:
+module.exports = sanitizeEmail;

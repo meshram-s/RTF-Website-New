@@ -12,9 +12,9 @@
 const express = require('express');
 const router = express.Router();
 
-const { register } = require('../controllers/authController');
+const { register, login } = require('../controllers/authController');
 const validateRequest = require('../middlewares/validateRequest');
-const { registerSchema } = require('../validators/authValidators');
+const { registerSchema ,loginSchema} = require('../validators/authValidators');
 
 // POST /api/auth/register
 // Request flow: validateRequest checks req.body against
@@ -22,7 +22,7 @@ const { registerSchema } = require('../validators/authValidators');
 // reaches the `register` controller. If it passes, req.body is
 // replaced with the clean, parsed data.
 router.post('/register', validateRequest(registerSchema), register);
-
+router.post('/login', validateRequest(loginSchema), login);
 // ─────────────────────────────────────────────────────────────
 // NEXT ENDPOINTS TO ADD HERE (same pattern):
 //

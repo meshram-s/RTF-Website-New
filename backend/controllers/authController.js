@@ -11,9 +11,11 @@
 //      from there)
 // ─────────────────────────────────────────────────────────────
 
-const userModel = require('../models/userModel');
-const { hashPassword } = require('../services/authService');
-const asyncHandler = require('../utils/asyncHandler');
+// const userModel = require('../models/userModel');
+// const { hashPassword } = require('../services/authService');
+// const asyncHandler = require('../utils/asyncHandler');
+
+
 
 /**
  * POST /api/auth/register
@@ -30,41 +32,6 @@ const asyncHandler = require('../utils/asyncHandler');
  *      (No JWT is issued here — the account can't log in until approved.
  *      The login endpoint, built the same way, checks status === "active".)
  */
-const register = asyncHandler(async (req, res) => {
-  const { personalEmail, password, ...rest } = req.body;
-
-  // 1. Duplicate check
-  const alreadyExists = await userModel.emailExists(personalEmail);
-  if (alreadyExists) {
-    // Throwing an error with .statusCode is how we control the
-    // HTTP status code that errorHandler.js eventually sends.
-    const err = new Error('An account with this email already exists');
-    err.statusCode = 409; // 409 Conflict
-    throw err;
-  }
-
-  // 2. Hash the password — this is the ONLY place a password
-  //    should ever be touched in plain text, and it happens
-  //    immediately, before anything is stored.
-  const passwordHash = await hashPassword(password);
-
-  // 3. Create the record via the model (model handles the
-  //    /users + /usersByEmail multi-path write internally)
-  const { uid } = await userModel.createUser({
-    ...rest,
-    personalEmail,
-    passwordHash,
-  });
-
-  // 4. Respond — 201 Created, consistent { success, data } shape
-  res.status(201).json({
-    success: true,
-    data: {
-      uid,
-      message: 'Registration received. Your domain admin will review your request.',
-    },
-  });
-});
 
 // ─────────────────────────────────────────────────────────────
 // NEXT UP (build these the same way, as separate functions below,
@@ -81,15 +48,152 @@ const register = asyncHandler(async (req, res) => {
 //      — NEVER include passwordHash in what you send back!
 // });
 //
-// const getMe = asyncHandler(async (req, res) => {
-//   // req.user is attached by authMiddleware.js after verifying the JWT
-//   const user = await userModel.getUserByUid(req.user.uid);
-//   res.json({ success: true, data: user });
-// });
-// ─────────────────────────────────────────────────────────────
+
+
+// controllers/authController.js
+const { createUser, getUserByEmail } = require('../models/userModel');
+const { hashPassword, comparePassword, generateAccessToken } = require('../services/authService');
+const { generateTempRtfId } = require('../services/idGeneratorService');
+
+/**
+ * REGISTER CONTROLLER
+ * Path: POST /api/auth/register
+ */
+const register = async (req, res) => {
+  try {
+    const {
+      name,
+      collegeEnrollmentNo,
+      collegeEmail,
+      personalEmail,
+      branch,
+      yearOfPassing,
+      phone,
+      domain,
+      password,
+    } = req.body;
+
+    // 1. Basic validation
+    if (!personalEmail || !password || !domain || !yearOfPassing) {
+      return res.status(400).json({
+        success: false,
+        error: 'personalEmail, password, domain, and yearOfPassing are required fields.',
+      });
+    }
+
+    // 2. Check if user already exists using O(1) email lookup
+    const existingUser = await getUserByEmail(personalEmail);
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        error: 'User with this personal email already exists.',
+      });
+    }
+
+    // 3. Hash the plain password
+    const passwordHash = await hashPassword(password);
+
+    // 4. Generate Temporary RTF ID (e.g., SD27-T01@RTF)
+    const rtfId = await generateTempRtfId(domain, yearOfPassing);
+
+    // 5. Save user via userModel (creates /users/{uid} and /usersByEmail/{sanitizedEmail})
+    const newUser = await createUser({
+      name,
+      collegeEnrollmentNo,
+      collegeEmail,
+      personalEmail,
+      branch,
+      yearOfPassing,
+      phone,
+      domain,
+      rtfId,             // Temporary RTF ID assigned on registration
+      passwordHash,
+      role: 'member',    // default role
+      status: 'pending', // default status
+      createdAt: Date.now(),
+    });
+
+    // 6. Omit sensitive fields from output
+    const { passwordHash: _, ...safeUserData } = newUser;
+
+    return res.status(201).json({
+      success: true,
+      message: 'Registration successful. Account pending approval.',
+      data: {
+        user: safeUserData,
+      },
+    });
+  } catch (error) {
+    console.error('Error in register controller:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Internal Server Error',
+    });
+  }
+};
+
+/**
+ * LOGIN CONTROLLER
+ * Path: POST /api/auth/login
+ */
+const login = async (req, res) => {
+  try {
+    const { personalEmail, password } = req.body;
+
+    // 1. Input validation
+    if (!personalEmail || !password) {
+      return res.status(400).json({
+        success: false,
+        error: 'Both personalEmail and password are required.',
+      });
+    }
+
+    // 2. O(1) Fast Lookup via /usersByEmail/{sanitizedEmail}
+    const user = await getUserByEmail(personalEmail);
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid credentials.',
+      });
+    }
+
+    // 3. Compare password with stored bcrypt hash
+    const isPasswordValid = await comparePassword(password, user.passwordHash);
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid credentials.',
+      });
+    }
+
+    // 4. Generate JWT Access Token
+    const token = generateAccessToken({
+      uid: user.uid,
+      role: user.role,
+      domain: user.domain,
+    });
+
+    // 5. Remove passwordHash from response data
+    const { passwordHash, ...safeUserData } = user;
+
+    return res.status(200).json({
+      success: true,
+      message: 'Login successful',
+      data: {
+        token,
+        user: safeUserData,
+      },
+    });
+  } catch (error) {
+    console.error('Error in login controller:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Internal Server Error',
+    });
+  }
+};
 
 module.exports = {
   register,
-  // login,
-  // getMe,
+  login,
 };
