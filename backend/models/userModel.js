@@ -89,11 +89,112 @@
 
 // models/userModel.js
 // Require 'db' directly from config/firebaseAdmin
+// const { db } = require('../config/firebaseAdmin'); 
+// const sanitizeEmail = require('../utils/sanitizeEmail');
+
+// /**
+//  * Creates a new user in /users/{uid} and creates an index in /usersByEmail/{sanitizedEmail}
+//  */
+// const createUser = async (userData) => {
+//   // Check if DB is initialized
+//   if (!db) {
+//     throw new Error('Database is not initialized. Check your .env Firebase credentials.');
+//   }
+
+//   // Generate a new Push ID key for UID
+//   const uid = db.ref('users').push().key;
+//   const sanitizedEmail = sanitizeEmail(userData.personalEmail);
+
+//   const userPayload = {
+//     name: userData.name || '',
+//     collegeEnrollmentNo: userData.collegeEnrollmentNo || '',
+//     collegeEmail: userData.collegeEmail || '',
+//     personalEmail: userData.personalEmail,
+//     branch: userData.branch || '',
+//     yearOfPassing: Number(userData.yearOfPassing) || null,
+//     phone: userData.phone || '',
+//     domain: userData.domain, // 'software' | 'electrical' | 'aeromech'
+//     role: userData.role || 'member', // 'member' | 'admin' | 'superadmin'
+//     status: userData.status || 'pending', // 'pending' | 'active' | 'rejected'
+//     passwordHash: userData.passwordHash,
+//     rtfId: userData.rtfId || null,
+//     createdAt: Date.now(),
+//     approvedBy: userData.approvedBy || null,
+//   };
+
+//   // Atomic Multi-Path Update
+//   const updates = {};
+//   updates[`/users/${uid}`] = userPayload;
+//   updates[`/usersByEmail/${sanitizedEmail}`] = uid;
+
+//   await db.ref().update(updates);
+//   return { uid, ...userPayload };
+// };
+
+// /**
+//  * Fast O(1) lookup to find UID by personalEmail
+//  */
+// const getUserByEmail = async (email) => {
+//   if (!db) {
+//     throw new Error('Database is not initialized. Check your .env Firebase credentials.');
+//   }
+
+//   const sanitizedEmail = sanitizeEmail(email);
+//   const snapshot = await db.ref(`usersByEmail/${sanitizedEmail}`).once('value');
+  
+//   if (!snapshot.exists()) return null;
+
+//   const uid = snapshot.val();
+//   const userSnapshot = await db.ref(`users/${uid}`).once('value');
+  
+//   if (!userSnapshot.exists()) return null;
+
+//   return { uid, ...userSnapshot.val() };
+// };
+
+// /**
+//  * Retrieves a user directly by their UID from /users/{uid}
+//  */
+// const getUserById = async (uid) => {
+//   if (!db) {
+//     throw new Error('Database is not initialized. Check your .env Firebase credentials.');
+//   }
+
+//   const snapshot = await db.ref(`users/${uid}`).once('value');
+//   if (!snapshot.exists()) return null;
+
+//   return { uid, ...snapshot.val() };
+// };
+
+// /**
+//  * Updates specific user fields in /users/{uid}
+//  */
+// const updateUser = async (uid, updateData) => {
+//   if (!db) {
+//     throw new Error('Database is not initialized. Check your .env Firebase credentials.');
+//   }
+
+//   await db.ref(`users/${uid}`).update(updateData);
+//   return true;
+// };
+
+// module.exports = {
+//   createUser,
+//   getUserByEmail,
+//   getUserById,
+//   updateUser,
+// };
+
+// new
+
+// models/userModel.js
+// Require 'db' directly from config/firebaseAdmin
 const { db } = require('../config/firebaseAdmin'); 
 const sanitizeEmail = require('../utils/sanitizeEmail');
 
 /**
- * Creates a new user in /users/{uid} and creates an index in /usersByEmail/{sanitizedEmail}
+ * Creates a new user under /users/{yearOfPassing}/{rtfId} 
+ * and creates an email index in /usersByEmail/{sanitizedEmail}
  */
 const createUser = async (userData) => {
   // Check if DB is initialized
@@ -101,8 +202,13 @@ const createUser = async (userData) => {
     throw new Error('Database is not initialized. Check your .env Firebase credentials.');
   }
 
-  // Generate a new Push ID key for UID
-  const uid = db.ref('users').push().key;
+  const yearOfPassing = Number(userData.yearOfPassing);
+  const rtfId = userData.rtfId;
+
+  if (!yearOfPassing || !rtfId) {
+    throw new Error('yearOfPassing and rtfId are required to structure the user node.');
+  }
+
   const sanitizedEmail = sanitizeEmail(userData.personalEmail);
 
   const userPayload = {
@@ -111,28 +217,30 @@ const createUser = async (userData) => {
     collegeEmail: userData.collegeEmail || '',
     personalEmail: userData.personalEmail,
     branch: userData.branch || '',
-    yearOfPassing: Number(userData.yearOfPassing) || null,
+    yearOfPassing: yearOfPassing,
     phone: userData.phone || '',
-    domain: userData.domain, // 'software' | 'electrical' | 'aeromech'
+    domain: userData.domain, // 'software' | 'mechanical' | 'electronics' | 'aero'
     role: userData.role || 'member', // 'member' | 'admin' | 'superadmin'
     status: userData.status || 'pending', // 'pending' | 'active' | 'rejected'
     passwordHash: userData.passwordHash,
-    rtfId: userData.rtfId || null,
+    rtfId: rtfId,
     createdAt: Date.now(),
     approvedBy: userData.approvedBy || null,
   };
 
   // Atomic Multi-Path Update
+  // 1. Save user under /users/<yearOfPassing>/<rtfId>
+  // 2. Save location pointer under /usersByEmail/<sanitizedEmail>
   const updates = {};
-  updates[`/users/${uid}`] = userPayload;
-  updates[`/usersByEmail/${sanitizedEmail}`] = uid;
+  updates[`/users/${yearOfPassing}/${rtfId}`] = userPayload;
+  updates[`/usersByEmail/${sanitizedEmail}`] = { yearOfPassing, rtfId };
 
   await db.ref().update(updates);
-  return { uid, ...userPayload };
+  return { rtfId, ...userPayload };
 };
 
 /**
- * Fast O(1) lookup to find UID by personalEmail
+ * Fast O(1) lookup to find user location by personalEmail
  */
 const getUserByEmail = async (email) => {
   if (!db) {
@@ -144,37 +252,38 @@ const getUserByEmail = async (email) => {
   
   if (!snapshot.exists()) return null;
 
-  const uid = snapshot.val();
-  const userSnapshot = await db.ref(`users/${uid}`).once('value');
+  // Pointer stores { yearOfPassing, rtfId }
+  const { yearOfPassing, rtfId } = snapshot.val();
+  const userSnapshot = await db.ref(`users/${yearOfPassing}/${rtfId}`).once('value');
   
   if (!userSnapshot.exists()) return null;
 
-  return { uid, ...userSnapshot.val() };
+  return { rtfId, ...userSnapshot.val() };
 };
 
 /**
- * Retrieves a user directly by their UID from /users/{uid}
+ * Retrieves a user directly by their yearOfPassing and rtfId from /users/{yearOfPassing}/{rtfId}
  */
-const getUserById = async (uid) => {
+const getUserById = async (yearOfPassing, rtfId) => {
   if (!db) {
     throw new Error('Database is not initialized. Check your .env Firebase credentials.');
   }
 
-  const snapshot = await db.ref(`users/${uid}`).once('value');
+  const snapshot = await db.ref(`users/${yearOfPassing}/${rtfId}`).once('value');
   if (!snapshot.exists()) return null;
 
-  return { uid, ...snapshot.val() };
+  return { rtfId, ...snapshot.val() };
 };
 
 /**
- * Updates specific user fields in /users/{uid}
+ * Updates specific user fields in /users/{yearOfPassing}/{rtfId}
  */
-const updateUser = async (uid, updateData) => {
+const updateUser = async (yearOfPassing, rtfId, updateData) => {
   if (!db) {
     throw new Error('Database is not initialized. Check your .env Firebase credentials.');
   }
 
-  await db.ref(`users/${uid}`).update(updateData);
+  await db.ref(`users/${yearOfPassing}/${rtfId}`).update(updateData);
   return true;
 };
 

@@ -10,7 +10,7 @@ const getDomainCode = (domain) => {
     software: 'SD',
     mechanical: 'MD',
     electronics: 'ED',
-    aero: 'AD',
+    aeromodeling: 'AD',
     
   };
   return mapping[domain?.toLowerCase()?.trim()] || 'XX';
