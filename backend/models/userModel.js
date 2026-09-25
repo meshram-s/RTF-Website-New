@@ -1,61 +1,3 @@
-// models/userModel.js
-// ─────────────────────────────────────────────────────────────
-// Model functions for Firebase Realtime Database.
-//
-// User structure:
-// /users/{yearOfPassing}/{rtfId}
-//
-// Email index:
-// /usersByEmail/{sanitizedEmail}
-//
-// Controllers must NOT call db.ref(...) directly.
-// ─────────────────────────────────────────────────────────────
-
-const { db } = require('../config/firebaseAdmin');
-const { sanitizeEmail } = require('../utils/sanitizeEmail');
-
-/**
- * User structure:
- *
- * /users/{yearOfPassing}/{rtfId}
- *
- * {
- *   uid,
- *   name,
- *   collegeEnrollmentNo,
- *   collegeEmail,
- *   personalEmail,
- *   branch,
- *   yearOfPassing,
- *   phone,
- *   domain,
- *   role,
- *   status,
- *   passwordHash,
- *   rtfId,
- *   createdAt,
- *   approvedBy
- * }
- */
-
-/**
- * Checks whether a personal email is already registered.
- *
- * Uses the /usersByEmail index for O(1) lookup.
- *
- * @param {string} personalEmail
- * @returns {Promise<boolean>}
- */
-async function emailExists(personalEmail) {
-  const key = sanitizeEmail(personalEmail);
-
-  const snapshot = await db
-    .ref(`usersByEmail/${key}`)
-    .get();
-
-  return snapshot.exists();
-}
-
 /**
  * Creates a new user.
  *
@@ -67,7 +9,9 @@ async function emailExists(personalEmail) {
  *
  * /usersByEmail/{sanitizedEmail}
  *
- * Both writes happen atomically.
+ * Email uniqueness is claimed atomically using a Firebase
+ * transaction so concurrent registrations cannot claim
+ * the same email.
  *
  * @param {object} userData
  * @returns {Promise<{uid: string, rtfId: string}>}
@@ -76,7 +20,48 @@ async function createUser(userData) {
   // Generate a unique Firebase UID.
   const uid = db.ref('users').push().key;
 
-  // Domain codes used for RTF ID.
+  const sanitizedKey =
+    sanitizeEmail(userData.personalEmail);
+
+  // ---------------------------------------------------------
+  // 1. Atomically claim the email address
+  // ---------------------------------------------------------
+  //
+  // If the email is empty, store our UID.
+  // If another user already owns it, keep the existing UID.
+  //
+  // This prevents two concurrent registrations from both
+  // successfully claiming the same email.
+  const emailRef =
+    db.ref(`usersByEmail/${sanitizedKey}`);
+
+  const emailTransaction =
+    await emailRef.transaction((current) => {
+      if (current === null) {
+        return uid;
+      }
+
+      // Email is already claimed.
+      return current;
+    });
+
+  const claimedUid =
+    emailTransaction.snapshot.val();
+
+  if (
+    !emailTransaction.committed ||
+    claimedUid !== uid
+  ) {
+    const err = new Error(
+      'An account with this email already exists'
+    );
+    err.statusCode = 409;
+    throw err;
+  }
+
+  // ---------------------------------------------------------
+  // 2. Domain code for RTF ID
+  // ---------------------------------------------------------
   const DOMAIN_CODE_MAP = {
     software: 'SD',
     electrical: 'ED',
@@ -86,6 +71,12 @@ async function createUser(userData) {
   const code = DOMAIN_CODE_MAP[userData.domain];
 
   if (!code) {
+    // Release the email claim because user creation
+    // cannot continue.
+    await emailRef.transaction((current) => {
+      return current === uid ? null : current;
+    });
+
     const err = new Error('Invalid domain');
     err.statusCode = 400;
     throw err;
@@ -100,23 +91,30 @@ async function createUser(userData) {
   const domainYearKey =
     `${userData.domain}${userData.yearOfPassing}`;
 
-  // Atomically get the next serial number.
+  // ---------------------------------------------------------
+  // 3. Atomically get the next RTF serial number
+  // ---------------------------------------------------------
   const counterRef =
     db.ref(`counters/${domainYearKey}`);
 
-  const transactionResult = await counterRef.transaction(
-    (current) => {
+  const transactionResult =
+    await counterRef.transaction((current) => {
       return (current || 0) + 1;
-    }
-  );
+    });
 
   if (!transactionResult.committed) {
+    // Release the email claim if RTF ID generation fails.
+    await emailRef.transaction((current) => {
+      return current === uid ? null : current;
+    });
+
     const err = new Error('Could not generate RTF ID');
     err.statusCode = 500;
     throw err;
   }
 
-  const serial = transactionResult.snapshot.val();
+  const serial =
+    transactionResult.snapshot.val();
 
   // 01, 02, 03...
   const paddedSerial =
@@ -127,7 +125,9 @@ async function createUser(userData) {
   const rtfId =
     `${code}${yy}-T${paddedSerial}@RTF`;
 
-  // Backend-controlled fields.
+  // ---------------------------------------------------------
+  // 4. Backend-controlled fields
+  // ---------------------------------------------------------
   const record = {
     uid,
 
@@ -140,104 +140,35 @@ async function createUser(userData) {
     approvedBy: null,
   };
 
-  const sanitizedKey =
-    sanitizeEmail(userData.personalEmail);
-
-  // Atomic multi-path update.
+  // ---------------------------------------------------------
+  // 5. Atomic user record write
+  // ---------------------------------------------------------
   const updates = {};
 
-  // NEW USER PATH
   updates[
     `users/${userData.yearOfPassing}/${rtfId}`
   ] = record;
 
-  // EMAIL INDEX
+  // Email index has already been claimed atomically.
+  // Keep the same UID in the index.
   updates[
     `usersByEmail/${sanitizedKey}`
   ] = uid;
 
-  await db.ref().update(updates);
+  try {
+    await db.ref().update(updates);
+  } catch (error) {
+    // If the user write fails, release the email claim
+    // so the user can try registration again.
+    await emailRef.transaction((current) => {
+      return current === uid ? null : current;
+    });
+
+    throw error;
+  }
 
   return {
     uid,
     rtfId,
   };
 }
-
-/**
- * Fetches a user by Firebase UID.
- *
- * Because UID is no longer the Firebase key, we search
- * through the year -> RTF ID structure.
- *
- * @param {string} uid
- * @returns {Promise<object|null>}
- */
-async function getUserByUid(uid) {
-  const snapshot = await db
-    .ref('users')
-    .get();
-
-  if (!snapshot.exists()) {
-    return null;
-  }
-
-  const usersByYear = snapshot.val();
-
-  for (const year of Object.keys(usersByYear)) {
-    const users = usersByYear[year];
-
-    if (!users) continue;
-
-    for (const rtfId of Object.keys(users)) {
-      const user = users[rtfId];
-
-      if (user && user.uid === uid) {
-        return user;
-      }
-    }
-  }
-
-  return null;
-}
-
-/**
- * Fetches a user using year of passing + RTF ID.
- *
- * @param {number|string} yearOfPassing
- * @param {string} rtfId
- * @returns {Promise<object|null>}
- */
-async function getUserByRtfId(yearOfPassing, rtfId) {
-  const snapshot = await db
-    .ref(`users/${yearOfPassing}/${rtfId}`)
-    .get();
-
-  return snapshot.exists()
-    ? snapshot.val()
-    : null;
-}
-
-/**
- * Checks whether an RTF ID exists for a particular
- * year of passing.
- *
- * @param {number|string} yearOfPassing
- * @param {string} rtfId
- * @returns {Promise<boolean>}
- */
-async function rtfIdExists(yearOfPassing, rtfId) {
-  const snapshot = await db
-    .ref(`users/${yearOfPassing}/${rtfId}`)
-    .get();
-
-  return snapshot.exists();
-}
-
-module.exports = {
-  emailExists,
-  createUser,
-  getUserByUid,
-  getUserByRtfId,
-  rtfIdExists,
-};
