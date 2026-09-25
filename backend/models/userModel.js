@@ -1,3 +1,61 @@
+// models/userModel.js
+// ─────────────────────────────────────────────────────────────
+// Model functions for Firebase Realtime Database.
+//
+// User structure:
+// /users/{yearOfPassing}/{rtfId}
+//
+// Email index:
+// /usersByEmail/{sanitizedEmail}
+//
+// Controllers must NOT call db.ref(...) directly.
+// ─────────────────────────────────────────────────────────────
+
+const { db } = require('../config/firebaseAdmin');
+const { sanitizeEmail } = require('../utils/sanitizeEmail');
+
+/**
+ * User structure:
+ *
+ * /users/{yearOfPassing}/{rtfId}
+ *
+ * {
+ *   uid,
+ *   name,
+ *   collegeEnrollmentNo,
+ *   collegeEmail,
+ *   personalEmail,
+ *   branch,
+ *   yearOfPassing,
+ *   phone,
+ *   domain,
+ *   role,
+ *   status,
+ *   passwordHash,
+ *   rtfId,
+ *   createdAt,
+ *   approvedBy
+ * }
+ */
+
+/**
+ * Checks whether a personal email is already registered.
+ *
+ * Uses the /usersByEmail index for O(1) lookup.
+ *
+ * @param {string} personalEmail
+ * @returns {Promise<boolean>}
+ */
+async function emailExists(personalEmail) {
+  const key = sanitizeEmail(personalEmail);
+
+  const snapshot = await db
+    .ref(`usersByEmail/${key}`)
+    .get();
+
+  return snapshot.exists();
+}
+
 /**
  * Creates a new user.
  *
@@ -172,3 +230,81 @@ async function createUser(userData) {
     rtfId,
   };
 }
+
+/**
+ * Fetches a user by Firebase UID.
+ *
+ * Because UID is no longer the Firebase key, we search
+ * through the year -> RTF ID structure.
+ *
+ * @param {string} uid
+ * @returns {Promise<object|null>}
+ */
+async function getUserByUid(uid) {
+  const snapshot = await db
+    .ref('users')
+    .get();
+
+  if (!snapshot.exists()) {
+    return null;
+  }
+
+  const usersByYear = snapshot.val();
+
+  for (const year of Object.keys(usersByYear)) {
+    const users = usersByYear[year];
+
+    if (!users) continue;
+
+    for (const rtfId of Object.keys(users)) {
+      const user = users[rtfId];
+
+      if (user && user.uid === uid) {
+        return user;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Fetches a user using year of passing + RTF ID.
+ *
+ * @param {number|string} yearOfPassing
+ * @param {string} rtfId
+ * @returns {Promise<object|null>}
+ */
+async function getUserByRtfId(yearOfPassing, rtfId) {
+  const snapshot = await db
+    .ref(`users/${yearOfPassing}/${rtfId}`)
+    .get();
+
+  return snapshot.exists()
+    ? snapshot.val()
+    : null;
+}
+
+/**
+ * Checks whether an RTF ID exists for a particular
+ * year of passing.
+ *
+ * @param {number|string} yearOfPassing
+ * @param {string} rtfId
+ * @returns {Promise<boolean>}
+ */
+async function rtfIdExists(yearOfPassing, rtfId) {
+  const snapshot = await db
+    .ref(`users/${yearOfPassing}/${rtfId}`)
+    .get();
+
+  return snapshot.exists();
+}
+
+module.exports = {
+  emailExists,
+  createUser,
+  getUserByUid,
+  getUserByRtfId,
+  rtfIdExists,
+};
