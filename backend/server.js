@@ -66,7 +66,7 @@ app.use('/api/recruitment', recruitmentRoutes);
 // Additional future modules:
 // app.use('/api/mail', mailRoutes);
 // app.use('/api/room', roomRoutes);
-
+// app.use('/api/users', userRoutes);//to check if user is there from rfID
 // A simple health-check route — useful to confirm the server is up
 // before testing real endpoints.
 app.get('/api/health', (req, res) => {

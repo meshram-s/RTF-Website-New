@@ -10,9 +10,8 @@ const { z } = require('zod');
 // Exactly 4 allowed domains
 const ALLOWED_DOMAINS = [
   'software',
-  'mechanical',
-  'aeromodeling',
   'electronics',
+  'aeromech',
 ];
 
 // Preprocess logic converts inputs like "Electronics", "ELECTRONICS" -> "electronics"
@@ -47,12 +46,12 @@ const registerSchema = z.object({
 });
 
 // Placeholder for login route
-const loginSchema = z.object({
-  personalEmail: z.string().trim().email('Enter a valid personal email'),
-  password: z.string().min(1, 'Password is required'),
-});
+// const loginSchema = z.object({
+//   personalEmail: z.string().trim().email('Enter a valid personal email'),
+//   password: z.string().min(1, 'Password is required'),
+// });
 
 module.exports = {
   registerSchema,
-  loginSchema,
+//   loginSchema,
 };

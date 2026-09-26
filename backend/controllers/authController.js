@@ -11,11 +11,13 @@
 //      from there)
 // ─────────────────────────────────────────────────────────────
 
-// const userModel = require('../models/userModel');
-// const { hashPassword } = require('../services/authService');
-// const asyncHandler = require('../utils/asyncHandler');
-
-
+const userModel = require('../models/userModel');
+const {
+  hashPassword,
+  /*comparePassword,
+  generateAccessToken,*/
+} = require('../services/authServices');
+const asyncHandler = require('../utils/asyncHandler');
 
 /**
  * POST /api/auth/register
@@ -52,7 +54,7 @@
 
 // controllers/authController.js
 const { createUser, getUserByEmail } = require('../models/userModel');
-const { hashPassword, comparePassword, generateAccessToken } = require('../services/authService');
+const { hashPassword, /* comparePassword, generateAccessToken*/ } = require('../services/authService');
 const { generateTempRtfId } = require('../services/idGeneratorService');
 
 /**
@@ -136,64 +138,73 @@ const register = async (req, res) => {
  * LOGIN CONTROLLER
  * Path: POST /api/auth/login
  */
-const login = async (req, res) => {
-  try {
-    const { personalEmail, password } = req.body;
+// const login = async (req, res) => {
+//   try {
+//     const { personalEmail, password } = req.body;
 
-    // 1. Input validation
-    if (!personalEmail || !password) {
-      return res.status(400).json({
-        success: false,
-        error: 'Both personalEmail and password are required.',
-      });
-    }
+//     // 1. Input validation
+//     if (!personalEmail || !password) {
+//       return res.status(400).json({
+//         success: false,
+//         error: 'Both personalEmail and password are required.',
+//       });
+//     }
 
-    // 2. O(1) Fast Lookup via /usersByEmail/{sanitizedEmail}
-    const user = await getUserByEmail(personalEmail);
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        error: 'Invalid credentials.',
-      });
-    }
+//     // 2. O(1) Fast Lookup via /usersByEmail/{sanitizedEmail}
+//     const user = await getUserByEmail(personalEmail);
+//     if (!user) {
+//       return res.status(401).json({
+//         success: false,
+//         error: 'Invalid credentials.',
+//       });
+//     }
 
-    // 3. Compare password with stored bcrypt hash
-    const isPasswordValid = await comparePassword(password, user.passwordHash);
-    if (!isPasswordValid) {
-      return res.status(401).json({
-        success: false,
-        error: 'Invalid credentials.',
-      });
-    }
+//     // 3. Compare password with stored bcrypt hash
+//     const isPasswordValid = await comparePassword(password, user.passwordHash);
+//     if (!isPasswordValid) {
+//       return res.status(401).json({
+//         success: false,
+//         error: 'Invalid credentials.',
+//       });
+//     }
 
-    // 4. Generate JWT Access Token
-    const token = generateAccessToken({
-      uid: user.uid,
-      role: user.role,
-      domain: user.domain,
-    });
+//     // 4. Generate JWT Access Token
+//     const token = generateAccessToken({
+//       uid: user.uid,
+//       role: user.role,
+//       domain: user.domain,
+//     });
 
     // 5. Remove passwordHash from response data
-    const { passwordHash, ...safeUserData } = user;
+//     const { passwordHash, ...safeUserData } = user;
 
-    return res.status(200).json({
-      success: true,
-      message: 'Login successful',
-      data: {
-        token,
-        user: safeUserData,
-      },
-    });
-  } catch (error) {
-    console.error('Error in login controller:', error);
-    return res.status(500).json({
-      success: false,
-      error: error.message || 'Internal Server Error',
-    });
-  }
-};
+//     return res.status(200).json({
+//       success: true,
+//       message: 'Login successful',
+//       data: {
+//         token,
+//         user: safeUserData,
+//       },
+//     });
+//   } catch (error) {
+//     console.error('Error in login controller:', error);
+//     return res.status(500).json({
+//       success: false,
+//       error: error.message || 'Internal Server Error',
+//     });
+//   }
+// };
 
+//   res.status(200).json({
+//     success: true,
+//     message: 'Login successful',
+//     data: {
+//       token,
+//       user: safeUser,
+//     },
+//   });
+// });
 module.exports = {
   register,
-  login,
+//   login,
 };

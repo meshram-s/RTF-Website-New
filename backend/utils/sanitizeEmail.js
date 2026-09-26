@@ -34,9 +34,9 @@ function sanitizeEmail(email) {
     .replace(/#/g, '_hash_')   // forbidden
     .replace(/\$/g, '_dollar_') // forbidden
     .replace(/\[/g, '_lb_')    // forbidden
-    .replace(/\]/g, '_rb_');   // forbidden
+    .replace(/\]/g, '_rb_')   // forbidden
+    .replace(/\//g, '_slash_')    // Added: Protects against forward slashes
+    .replace(/[\x00-\x1F\x7F]/g, ''); //Strips out hidden control characters & newlines
 }
 
-// module.exports = { sanitizeEmail };
-// With this:
-module.exports = sanitizeEmail;
+module.exports = { sanitizeEmail };

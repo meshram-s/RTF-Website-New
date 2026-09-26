@@ -10,7 +10,8 @@
 // NEVER get these credentials; only this backend process holds them.
 // ─────────────────────────────────────────────────────────────
 
-// const admin = require('firebase-admin');
+const { initializeApp, getApps, cert } = require('firebase-admin/app');
+const { getDatabase } = require('firebase-admin/database');
 
 // The private key in .env has literal "\n" characters (since .env
 // values are single-line strings) — we convert them back to real
