@@ -36,15 +36,20 @@
 // const db = admin.database();
 
 // module.exports = { admin, db };
+// config/firebaseAdmin.js
+// ─────────────────────────────────────────────────────────────
+// Initializes the Firebase Admin SDK using your project credentials from .env.
+// Exports the Firestore instance (`db`) used by controllers/models.
+// ─────────────────────────────────────────────────────────────
 
 const firebaseAdmin = require('firebase-admin');
 const { initializeApp, getApps, cert } = require('firebase-admin/app');
-const { getDatabase } = require('firebase-admin/database');
+const { getFirestore } = require('firebase-admin/firestore');
 
 const projectId = process.env.FIREBASE_PROJECT_ID;
 const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-const privateKey = process.env.FIREBASE_PRIVATE_KEY 
-  ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n') 
+const privateKey = process.env.FIREBASE_PRIVATE_KEY
+  ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
   : undefined;
 
 let app = null;
@@ -69,7 +74,8 @@ if (getApps().length === 0) {
 }
 
 if (app) {
-  db = getDatabase(app);
+  // Use getFirestore(app) so that db.collection() works across all controllers
+  db = getFirestore(app);
 }
 
 module.exports = { admin: firebaseAdmin, db };
