@@ -12,7 +12,11 @@
 // ─────────────────────────────────────────────────────────────
 
 const userModel = require('../models/userModel');
-const { hashPassword } = require('../services/authService');
+const {
+  hashPassword,
+  comparePassword,
+  generateAccessToken,
+} = require('../services/authServices');
 const asyncHandler = require('../utils/asyncHandler');
 
 /**
@@ -50,46 +54,90 @@ const register = asyncHandler(async (req, res) => {
 
   // 3. Create the record via the model (model handles the
   //    /users + /usersByEmail multi-path write internally)
-  const { uid } = await userModel.createUser({
-    ...rest,
-    personalEmail,
-    passwordHash,
-  });
+  const { uid, rtfId } = await userModel.createUser({
+  ...rest,
+  personalEmail,
+  passwordHash,
+});
 
   // 4. Respond — 201 Created, consistent { success, data } shape
   res.status(201).json({
     success: true,
     data: {
       uid,
+      rtfId,
       message: 'Registration received. Your domain admin will review your request.',
     },
   });
 });
 
-// ─────────────────────────────────────────────────────────────
-// NEXT UP (build these the same way, as separate functions below,
-// once register is tested and working):
-//
-// const login = asyncHandler(async (req, res) => {
-//   1. userModel.getUserByEmail(personalEmail)
-//   2. if not found → 401 "Invalid credentials" (don't reveal
-//      whether it was the email or password that was wrong)
-//   3. if found but status !== "active" → 403 "Account pending approval"
-//   4. comparePassword(password, user.passwordHash) → if false, 401
-//   5. generateAccessToken({ uid, role, domain })
-//   6. res.json({ success: true, data: { token, user: {...safe fields} } })
-//      — NEVER include passwordHash in what you send back!
-// });
-//
-// const getMe = asyncHandler(async (req, res) => {
-//   // req.user is attached by authMiddleware.js after verifying the JWT
-//   const user = await userModel.getUserByUid(req.user.uid);
-//   res.json({ success: true, data: user });
-// });
-// ─────────────────────────────────────────────────────────────
+const login = asyncHandler(async (req, res) => {
+  const { rtfId, password } = req.body;
 
+  // Extract year from RTF ID
+  // Example: SD27-T01@RTF -> 2027
+  const yearMatch = rtfId.match(/^[A-Z]+(\d{2})-/);
+
+  if (!yearMatch) {
+    const err = new Error('Invalid RTF ID');
+    err.statusCode = 401;
+    throw err;
+  }
+
+  const yearOfPassing = `20${yearMatch[1]}`;
+
+  // Find user using year + RTF ID
+  const user = await userModel.getUserByRtfId(
+    yearOfPassing,
+    rtfId
+  );
+
+  // User doesn't exist
+  if (!user) {
+    const err = new Error('Invalid credentials');
+    err.statusCode = 401;
+    throw err;
+  }
+
+  // Account must be active
+  if (user.status !== 'active') {
+    const err = new Error('Account pending approval');
+    err.statusCode = 403;
+    throw err;
+  }
+
+  // Check password
+  const passwordMatches = await comparePassword(
+    password,
+    user.passwordHash
+  );
+
+  if (!passwordMatches) {
+    const err = new Error('Invalid credentials');
+    err.statusCode = 401;
+    throw err;
+  }
+
+  // Generate JWT
+  const token = generateAccessToken({
+    uid: user.uid,
+    role: user.role,
+    domain: user.domain,
+  });
+
+  // Never send passwordHash
+  const { passwordHash, ...safeUser } = user;
+
+  res.status(200).json({
+    success: true,
+    message: 'Login successful',
+    data: {
+      token,
+      user: safeUser,
+    },
+  });
+});
 module.exports = {
   register,
-  // login,
-  // getMe,
+  login,
 };
